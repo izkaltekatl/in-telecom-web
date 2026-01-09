@@ -1,0 +1,583 @@
+import React, { useState } from 'react';
+import { Phone, Shield, Cpu, MapPin, CheckCircle, Server, Menu, X, Mail, Clock, Award, Users, Activity, Bot, Sparkles, FileText, Download, Loader2 } from 'lucide-react';
+
+// --- CONFIGURACIÓN API GEMINI ---
+const apiKey = ""; // La clave se inyectará automáticamente en el entorno de ejecución
+
+// Función auxiliar para llamar a Gemini
+async function callGeminiAPI(query, systemInstruction) {
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: query }] }],
+        systemInstruction: { parts: [{ text: systemInstruction }] }
+      })
+    });
+
+    if (!response.ok) throw new Error('Error en la API');
+    const data = await response.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || "No se pudo generar una respuesta.";
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
+
+// Función auxiliar para exportar a Word
+const exportToWord = (content, filename) => {
+  const title = "Reporte Técnico IN Telecom & TI";
+  const htmlContent = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+      <head>
+          <meta charset='utf-8'>
+          <title>${title}</title>
+          <style>
+              body { font-family: 'Arial', sans-serif; font-size: 11pt; line-height: 1.5; }
+              h2 { color: #1e3a8a; border-bottom: 2px solid #0ea5e9; padding-bottom: 5px; }
+              strong { color: #333; }
+              .footer { margin-top: 30px; border-top: 1px solid #ccc; padding-top: 10px; font-size: 9pt; color: #666; }
+          </style>
+      </head>
+      <body>
+          <h2>${title}</h2>
+          <p><strong>Fecha:</strong> ${new Date().toLocaleDateString()}</p>
+          <hr/>
+          <br/>
+          <div>${content}</div>
+          <br/>
+          <div class="footer">
+              <p>Generado por Asistente IA - IN Telecom & TI<br/>Ing. Izkaltekatl Nieva Rojas | Tel: 5514840984</p>
+          </div>
+      </body>
+      </html>`;
+
+  const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${filename}.doc`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
+// --- COMPONENTES UI ---
+
+const Logo = () => (
+  <div className="flex items-center gap-3">
+    <div className="relative w-12 h-12 bg-blue-900 rounded-xl flex items-center justify-center text-white overflow-hidden shadow-lg border-2 border-blue-800">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-7 h-7 z-10">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" className="opacity-30 fill-blue-800 stroke-none" />
+        <path d="M9 12h6" />
+        <path d="M12 9v6" />
+        <path d="M5 12h.01" />
+        <path d="M19 12h.01" />
+        <circle cx="12" cy="12" r="9" strokeWidth="1.5" className="opacity-50" />
+      </svg>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-700/40 to-transparent"></div>
+    </div>
+    <div className="flex flex-col">
+      <span className="font-extrabold text-2xl leading-none text-slate-800 tracking-tighter">IN</span>
+      <span className="text-[10px] text-blue-600 font-bold tracking-[0.2em] uppercase">Telecom & TI</span>
+    </div>
+  </div>
+);
+
+const ServiceCard = ({ icon: Icon, title, desc, features }) => (
+  <div className="bg-white p-6 rounded-xl shadow-md border border-slate-100 hover:shadow-xl transition-all duration-300 group hover:-translate-y-1">
+    <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-600 transition-colors duration-300">
+      <Icon className="w-7 h-7 text-blue-600 group-hover:text-white transition-colors" />
+    </div>
+    <h3 className="text-xl font-bold text-slate-800 mb-3">{title}</h3>
+    <p className="text-slate-600 mb-4 text-sm leading-relaxed">{desc}</p>
+    <ul className="space-y-2 border-t border-slate-100 pt-4">
+      {features.map((item, idx) => (
+        <li key={idx} className="flex items-start text-sm text-slate-500">
+          <CheckCircle className="w-4 h-4 text-green-500 mr-2 mt-0.5 shrink-0" />
+          {item}
+        </li>
+      ))}
+    </ul>
+  </div>
+);
+
+// Componente para la herramienta de IA individual
+const AIToolCard = ({ title, icon: Icon, description, placeholder, buttonText, systemPrompt, exportName, colorTheme }) => {
+  const [input, setInput] = useState('');
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleGenerate = async () => {
+    if (!input.trim()) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const text = await callGeminiAPI(input, systemPrompt);
+      // Formato simple de markdown a HTML
+      const formatted = text.replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      setResult(formatted);
+    } catch (err) {
+      setError("El servicio de IA no está disponible momentáneamente. Por favor intente más tarde.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const themeClasses = {
+    blue: {
+      bg: "bg-gradient-to-br from-slate-800 to-blue-900",
+      border: "border-blue-700/50",
+      iconBg: "bg-blue-600/20",
+      iconBorder: "border-blue-500/30",
+      btn: "bg-blue-600 hover:bg-blue-500",
+      focus: "focus:border-blue-400"
+    },
+    purple: {
+      bg: "bg-gradient-to-br from-slate-800 to-purple-900",
+      border: "border-purple-700/50",
+      iconBg: "bg-purple-600/20",
+      iconBorder: "border-purple-500/30",
+      btn: "bg-purple-600 hover:bg-purple-500",
+      focus: "focus:border-purple-400"
+    }
+  };
+
+  const t = themeClasses[colorTheme];
+
+  return (
+    <div className={`${t.bg} rounded-2xl p-6 shadow-2xl text-white border ${t.border} flex flex-col h-full`}>
+      <div className="mb-4">
+        <div className={`${t.iconBg} rounded-xl p-3 mb-3 border ${t.iconBorder} w-fit`}>
+          <h3 className="font-bold flex items-center gap-2">
+            <Icon className="w-5 h-5" />
+            <span>{title}</span>
+          </h3>
+        </div>
+        <p className="text-slate-300 text-xs leading-relaxed mb-4 min-h-[40px]">
+          {description}
+        </p>
+      </div>
+
+      <div className="bg-white/5 rounded-xl p-4 border border-white/10 flex-grow flex flex-col">
+        <textarea 
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          className={`w-full bg-slate-900/50 border border-slate-600 rounded-lg p-3 text-white text-xs focus:outline-none ${t.focus} transition-all placeholder-slate-500 mb-4 resize-none`} 
+          rows="3" 
+          placeholder={placeholder}
+        ></textarea>
+        
+        <div className="mt-auto">
+          <button 
+            onClick={handleGenerate} 
+            disabled={loading || !input.trim()}
+            className={`w-full ${t.btn} text-white font-bold py-2 px-4 rounded-lg shadow-lg flex justify-center items-center gap-2 transition-all text-xs disabled:opacity-50 disabled:cursor-not-allowed`}
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            <span>{loading ? "Analizando..." : buttonText}</span>
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-4 text-red-400 text-xs text-center animate-in fade-in">
+            {error}
+          </div>
+        )}
+
+        {result && (
+          <div className="mt-4 pt-4 border-t border-white/10 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="text-blue-200 font-bold text-xs">Resultado Generado:</h4>
+              <button 
+                onClick={() => exportToWord(result, exportName)} 
+                className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded flex items-center gap-1 transition-colors shadow-sm"
+              >
+                <Download className="w-3 h-3" />
+                <span>Word</span>
+              </button>
+            </div>
+            <div 
+              className="text-slate-200 text-xs leading-relaxed space-y-2 bg-slate-900/50 p-3 rounded border border-white/5 max-h-40 overflow-y-auto custom-scrollbar"
+              dangerouslySetInnerHTML={{ __html: result }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
+      {/* Navbar */}
+      <nav className="bg-white sticky top-0 z-50 shadow-sm border-b border-slate-200/80 backdrop-blur-md bg-white/95">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-20 items-center">
+            <Logo />
+            <div className="hidden md:flex space-x-8 items-center">
+              <a href="#inicio" className="text-slate-600 hover:text-blue-700 font-medium transition-colors">Inicio</a>
+              <a href="#servicios" className="text-slate-600 hover:text-blue-700 font-medium transition-colors">Servicios</a>
+              <a href="#ia-tools" className="text-blue-600 font-bold flex items-center gap-1 hover:text-blue-800 transition-colors">
+                <Sparkles className="w-4 h-4" />
+                Herramientas IA
+              </a>
+              <a href="#contacto" className="bg-blue-800 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition font-medium shadow-md flex items-center gap-2">
+                <Phone className="w-4 h-4" />
+                5514840984
+              </a>
+            </div>
+            <button onClick={toggleMenu} className="md:hidden text-slate-600 focus:outline-none p-2 rounded-md hover:bg-slate-100">
+              {isMenuOpen ? <X className="w-7 h-7" /> : <Menu className="w-7 h-7" />}
+            </button>
+          </div>
+        </div>
+        {isMenuOpen && (
+          <div className="md:hidden bg-white border-t border-slate-100 absolute w-full shadow-lg animate-in slide-in-from-top-5">
+            <div className="px-4 pt-2 pb-6 space-y-2">
+              <a href="#inicio" onClick={toggleMenu} className="block px-3 py-3 text-slate-600 hover:bg-blue-50 hover:text-blue-700 rounded-md font-medium">Inicio</a>
+              <a href="#servicios" onClick={toggleMenu} className="block px-3 py-3 text-slate-600 hover:bg-blue-50 hover:text-blue-700 rounded-md font-medium">Servicios</a>
+              <a href="#ia-tools" onClick={toggleMenu} className="block px-3 py-3 text-blue-600 font-bold hover:bg-blue-50 rounded-md flex items-center gap-2">
+                <Sparkles className="w-4 h-4" />
+                Herramientas IA
+              </a>
+              <a href="#contacto" onClick={toggleMenu} className="block px-3 py-3 bg-blue-800 text-white rounded-md text-center font-medium mt-4 shadow-sm">
+                Llamar: 5514840984
+              </a>
+            </div>
+          </div>
+        )}
+      </nav>
+
+      {/* Hero Section */}
+      <header id="inicio" className="relative bg-slate-900 overflow-hidden">
+        <div className="absolute inset-0 z-0">
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-900 via-blue-900/90 to-slate-900/80 z-10"></div>
+          <div className="w-full h-full bg-[url('https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-30"></div>
+        </div>
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-32">
+          <div className="max-w-3xl">
+            <div className="inline-flex items-center gap-2 bg-blue-600/20 text-blue-200 px-4 py-1.5 rounded-full text-sm font-semibold mb-6 border border-blue-500/30 backdrop-blur-sm">
+              <Award className="w-4 h-4 text-blue-400" />
+              Más de 30 años de experiencia técnica
+            </div>
+            <h1 className="text-4xl md:text-6xl font-extrabold text-white leading-tight mb-6 tracking-tight">
+              Experiencia que protege.<br/>
+              <span className="text-blue-400">Tecnología que conecta.</span>
+            </h1>
+            <p className="text-xl text-slate-300 mb-8 font-light leading-relaxed max-w-2xl">
+              Soluciones de ingeniería en telecomunicaciones y seguridad supervisadas directamente por el <strong>Ing. Izkaltekatl Nieva Rojas</strong>. Investigación, programación y ejecución experta.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <a href="#contacto" className="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition shadow-lg shadow-blue-900/50 text-center flex items-center justify-center gap-2">
+                <Activity className="w-5 h-5" />
+                Cotizar Solución
+              </a>
+              <a href="#ia-tools" className="px-8 py-4 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-lg transition backdrop-blur-sm border border-white/20 text-center flex items-center justify-center gap-2">
+                <Sparkles className="w-4 h-4 text-yellow-400" />
+                Probar IA
+              </a>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Stats Strip */}
+      <div className="bg-white border-b border-slate-200 relative z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-slate-100">
+            <div className="py-6 text-center px-2">
+              <div className="text-2xl font-bold text-blue-800">30+ Años</div>
+              <div className="text-xs text-slate-500 uppercase tracking-wide mt-1">Trayectoria</div>
+            </div>
+            <div className="py-6 text-center px-2">
+              <div className="text-2xl font-bold text-blue-800">100%</div>
+              <div className="text-xs text-slate-500 uppercase tracking-wide mt-1">Supervisión Directa</div>
+            </div>
+            <div className="py-6 text-center px-2">
+              <div className="text-2xl font-bold text-blue-800">CDMX</div>
+              <div className="text-xs text-slate-500 uppercase tracking-wide mt-1">+3 Horas Redonda</div>
+            </div>
+            <div className="py-6 text-center px-2">
+              <div className="text-2xl font-bold text-blue-800">I+D</div>
+              <div className="text-xs text-slate-500 uppercase tracking-wide mt-1">Investigación TI</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Services Section */}
+      <section id="servicios" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center mb-16">
+          <h2 className="text-blue-700 font-bold tracking-wide uppercase text-sm mb-2">Soluciones Integrales</h2>
+          <h3 className="text-3xl md:text-4xl font-bold text-slate-900">Infraestructura Crítica & Seguridad</h3>
+          <p className="mt-4 text-slate-600 max-w-2xl mx-auto">
+            Desde sistemas legados hasta tecnología IP de punta. Diagnosticamos, diseñamos y ejecutamos.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-8">
+          <ServiceCard 
+            icon={Phone}
+            title="Telecomunicaciones"
+            desc="Especialistas en la transición analógica-digital. Mantenimiento de conmutadores y migración a telefonía IP."
+            features={[
+              "Conmutadores (Venta y Reparación)",
+              "Telefonía VoIP y Troncales SIP",
+              "Cableado Estructurado (Certificado)",
+              "Reubicación de Sites"
+            ]}
+          />
+          <ServiceCard 
+            icon={Shield}
+            title="Seguridad Electrónica"
+            desc="Sistemas de protección perimetral e interna. Integramos cámaras y controles de acceso a su red de datos."
+            features={[
+              "CCTV IP de Alta Definición",
+              "Videoporteros Inteligentes",
+              "Control de Acceso Biométrico",
+              "Automatización de Puertas"
+            ]}
+          />
+          <ServiceCard 
+            icon={Server}
+            title="Ingeniería TI"
+            desc="Investigación y desarrollo de soluciones informáticas a medida. No solo instalamos, programamos."
+            features={[
+              "Redes WiFi de Alta Densidad",
+              "Seguridad Lógica (Firewall)",
+              "Servidores y Virtualización",
+              "Consultoría en Nuevas Tecnologías"
+            ]}
+          />
+        </div>
+      </section>
+
+      {/* AI Consulting Section (GEMINI API) */}
+      <section id="ia-tools" className="py-20 bg-slate-900">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-12">
+            <span className="inline-block bg-gradient-to-r from-blue-500 to-purple-600 text-white text-[10px] font-bold px-3 py-1 rounded-full mb-3 tracking-wider">
+              POTENCIADO POR GEMINI API
+            </span>
+            <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">Consultoría Inteligente</h2>
+            <p className="text-slate-400 max-w-2xl mx-auto">
+              Utilice nuestra integración de IA para obtener diagnósticos preliminares y planes de mantenimiento al instante. Una muestra de nuestra capacidad de innovación técnica.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            
+            {/* Tool 1: Solution Architect */}
+            <AIToolCard 
+              title="Asistente de Soluciones" 
+              icon={Bot}
+              colorTheme="blue"
+              description='Describa su necesidad (ej: "Oficina nueva, 10 nodos de red y 2 cámaras") para recibir una propuesta técnica preliminar basada en estándares.'
+              placeholder="Ej: Necesito controlar el acceso de 50 empleados y cámaras para el estacionamiento..."
+              buttonText="Generar Solución Técnica"
+              exportName="Solucion_Tecnica_IN"
+              systemPrompt={`
+                Actúa como el Ingeniero Senior de IN Telecom & TI.
+                Experto en Telecom, Seguridad y TI.
+                Tarea: Generar una recomendación técnica PRELIMINAR breve.
+                Estructura:
+                1. Análisis de Necesidad
+                2. Hardware Sugerido (Marcas confiables: Hikvision, Grandstream, Ubiquiti)
+                3. Siguiente Paso (Visita técnica)
+                Tono: Profesional y técnico. Idioma: Español. Máximo 100 palabras.
+              `}
+            />
+
+            {/* Tool 2: Maintenance Planner */}
+            <AIToolCard 
+              title="Plan de Mantenimiento" 
+              icon={FileText}
+              colorTheme="purple"
+              description='Liste sus equipos actuales (ej: "Conmutador Panasonic y DVR Hikvision") para generar una rutina de cuidado preventivo que extienda su vida útil.'
+              placeholder="Ej: Tengo 8 cámaras análogas instaladas hace 5 años y un conmutador IP..."
+              buttonText="Generar Plan de Cuidado"
+              exportName="Plan_Mantenimiento_IN"
+              systemPrompt={`
+                Actúa como Gerente de Mantenimiento de IN Telecom & TI.
+                Tarea: Crear una lista de tareas de mantenimiento preventivo basada en el equipo listado.
+                Enfoque: Extender vida útil y prevenir fallas.
+                Formato: Lista con viñetas.
+                Tono: Preventivo y experto. Idioma: Español. Máximo 100 palabras.
+              `}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Profile Section */}
+      <section id="perfil" className="py-20 bg-slate-100">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200 flex flex-col md:flex-row">
+            <div className="md:w-1/2 p-8 md:p-12 flex flex-col justify-center">
+              <div className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-md text-xs font-bold mb-6 w-fit">
+                DIRECTOR DE PROYECTOS
+              </div>
+              <h2 className="text-3xl font-bold text-slate-900 mb-4">Ing. Izkaltekatl Nieva Rojas</h2>
+              <h3 className="text-xl text-blue-600 mb-6 font-medium">Investigador de Tecnologías y Programador</h3>
+              
+              <p className="text-slate-600 mb-6 leading-relaxed">
+                "En un mercado lleno de opciones genéricas, ofrezco un trato directo y experto. Mi perfil combina 30 años de experiencia en campo con la investigación activa de nuevas tecnologías."
+              </p>
+              
+              <div className="space-y-4 mb-8">
+                <div className="flex items-start gap-3">
+                  <div className="bg-blue-50 p-2 rounded-lg text-blue-600 mt-1"><Cpu className="w-5 h-5" /></div>
+                  <div>
+                    <h4 className="font-bold text-slate-800">Investigación Técnica</h4>
+                    <p className="text-sm text-slate-500">Análisis profundo de cada equipo antes de implementarlo.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="bg-blue-50 p-2 rounded-lg text-blue-600 mt-1"><Users className="w-5 h-5" /></div>
+                  <div>
+                    <h4 className="font-bold text-slate-800">Cuadrillas Supervisadas</h4>
+                    <p className="text-sm text-slate-500">Yo diseño y superviso; mi equipo de confianza instala. Usted trata conmigo.</p>
+                  </div>
+                </div>
+              </div>
+
+              <a href="#contacto" className="text-blue-700 font-bold hover:text-blue-900 inline-flex items-center gap-2 group">
+                Contactar Directamente <span className="group-hover:translate-x-1 transition-transform">→</span>
+              </a>
+            </div>
+            <div className="md:w-1/2 bg-slate-800 relative min-h-[300px]">
+               <img 
+                  src="https://images.unsplash.com/photo-1581094794329-cd56b5095bb4?q=80&w=1968&auto=format&fit=crop" 
+                  alt="Ingeniería y Planificación" 
+                  className="w-full h-full object-cover opacity-60 mix-blend-overlay"
+                />
+                <div className="absolute inset-0 flex items-center justify-center p-8">
+                  <div className="text-center text-white/90">
+                    <Activity className="w-16 h-16 mx-auto mb-4 text-blue-400" />
+                    <p className="text-lg font-light italic">"La calidad no se delega, se supervisa."</p>
+                  </div>
+                </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Coverage Section */}
+      <section id="cobertura" className="py-16 bg-white">
+        <div className="max-w-5xl mx-auto px-4 text-center">
+            <MapPin className="w-12 h-12 text-blue-600 mx-auto mb-4" />
+            <h2 className="text-3xl font-bold text-slate-900 mb-6">Zona de Atención</h2>
+            <p className="text-lg text-slate-600 mb-8 max-w-2xl mx-auto">
+              Operamos desde la <strong>CDMX</strong> con capacidad de despliegue en un radio de hasta 3 horas, garantizando soporte post-venta efectivo.
+            </p>
+            <div className="flex flex-wrap justify-center gap-3">
+                {['CDMX', 'Edo. Méx', 'Puebla', 'Hidalgo', 'Morelos', 'Tlaxcala'].map((city) => (
+                    <span key={city} className="bg-slate-50 px-5 py-2 rounded-full text-slate-700 font-semibold border border-slate-200 hover:border-blue-300 transition-colors cursor-default">
+                        {city}
+                    </span>
+                ))}
+            </div>
+        </div>
+      </section>
+
+      {/* Contact Footer */}
+      <footer id="contacto" className="bg-slate-900 text-slate-300 py-16 border-t border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid md:grid-cols-2 gap-12 items-start">
+            <div>
+              <div className="mb-6">
+                <Logo />
+              </div>
+              <p className="text-slate-400 mb-8 max-w-md leading-relaxed">
+                Llevamos más de 30 años brindando tranquilidad y conectividad a empresas mexicanas. Contáctenos para una evaluación técnica sin compromiso.
+              </p>
+              
+              <div className="space-y-5">
+                <a href="tel:5514840984" className="flex items-center gap-4 group p-3 rounded-lg hover:bg-slate-800 transition">
+                  <div className="bg-blue-600 p-2 rounded-full text-white group-hover:bg-blue-500 transition">
+                    <Phone className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="block text-xs text-slate-500 font-bold uppercase tracking-wider">Línea Directa</span>
+                    <span className="text-xl text-white font-bold tracking-wide">55 1484 0984</span>
+                  </div>
+                </a>
+                
+                <div className="flex items-center gap-4 p-3">
+                  <div className="bg-slate-800 p-2 rounded-full text-blue-500">
+                    <Mail className="w-5 h-5" />
+                  </div>
+                  <div>
+                     <span className="block text-xs text-slate-500 font-bold uppercase tracking-wider">Correo Electrónico</span>
+                    <span className="text-white">contacto@in-telecom.com</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 p-3">
+                  <div className="bg-slate-800 p-2 rounded-full text-blue-500">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                     <span className="block text-xs text-slate-500 font-bold uppercase tracking-wider">Horario</span>
+                    <span className="text-white">Lun - Vie: 9:00 - 18:00</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-8 shadow-2xl">
+              <h3 className="text-xl font-bold text-slate-800 mb-1">Solicitar Cotización</h3>
+              <p className="text-sm text-slate-500 mb-6">Atención directa del Ing. Nieva Rojas</p>
+              
+              <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1 uppercase">Nombre</label>
+                  <input type="text" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 text-slate-800 transition" placeholder="Su nombre completo" />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1 uppercase">Teléfono</label>
+                        <input type="tel" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 text-slate-800 transition" placeholder="10 dígitos" />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1 uppercase">Servicio</label>
+                        <select className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 text-slate-800 transition">
+                            <option>Conmutadores</option>
+                            <option>Seguridad / CCTV</option>
+                            <option>Redes / TI</option>
+                            <option>Otro</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1 uppercase">Mensaje</label>
+                  <textarea rows={3} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 text-slate-800 transition" placeholder="¿En qué podemos ayudarle?"></textarea>
+                </div>
+                
+                <button className="w-full bg-blue-700 hover:bg-blue-600 text-white font-bold py-4 rounded-lg transition shadow-lg mt-2 flex justify-center items-center gap-2">
+                  <Mail className="w-5 h-5" />
+                  Enviar Solicitud
+                </button>
+              </form>
+            </div>
+          </div>
+          <div className="border-t border-slate-800 mt-12 pt-8 text-center text-sm text-slate-500">
+            © {new Date().getFullYear()} IN Telecom & TI. Todos los derechos reservados.
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
